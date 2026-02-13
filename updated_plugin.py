@@ -15,6 +15,8 @@ from volatility3.framework.symbols.windows import pdbutil
 from volatility3.plugins.windows import pslist, vadinfo, info
 
 from capstone import *
+from collections import Counter
+import re
 
 vollog = logging.getLogger(__name__)
 
@@ -377,6 +379,62 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
 
         """ Init capstone to current process  """
         self._md_capstone = Cs(CS_ARCH_X86, mode)
+
+
+    def asm_code_entropy(self, asm_code):
+        """ Shannon entropy to measure the variability of assembly language instructions """
+        mnemonics = [ins.mnemonic for ins in asm_code]
+        freq = Counter(mnemonics)
+        total = len(mnemonics)
+
+        entropy = 0.0
+        for count in freq.values():
+            p = count / total
+            entropy -= p * math.log2(p)
+
+        return entropy
+    
+    def nops_sum(self, asm_code) -> int:
+        total_nops = 0
+
+        """ Count total number of NOPs, include classic NOPS and camouflaged NOPS """
+        for ins in asm_code: 
+            op_code = ins.mnemonic
+            ops = ins.op_str.replace(" ", "")
+
+            # Classic NOPs like 0x90 or NOPs multi-byte like 0F 1F 00
+            if op_code == "nop":
+                total_nops += 1
+
+            # xchg reg, reg (tipical NOP if both ops are the same)
+            elif op_code == "xchg":
+                # mismo operando a ambos lados
+                ops_parts = ops.split(",")
+                if len(ops_parts) == 2 and ops_parts[0] == ops_parts[1]:
+                    total_nops += 1
+
+            # mov reg, reg (tipical NOP if both ops are the same)
+            elif op_code == "mov":
+                ops_parts = ops.split(",")
+                if len(ops_parts) == 2 and ops_parts[0] == ops_parts[1]:
+                    total_nops += 1
+
+            # lea reg, [reg+0] or lea reg, [reg] (load the same address)
+            elif op_code == "lea":
+                ops_parts = ops.split(",")
+                if len(ops_parts) == 2:
+                    dst, src = ops_parts
+                    # patterns like: [rax], [rax+0], [rax+0x0]
+                    if re.fullmatch(rf"\[{dst}(\+0x?0)?\]", src):
+                        total_nops += 1
+
+            # add/sub reg, 0 (arithmetic operations with 0, result does not change)
+            elif op_code in ("add", "sub", "or", "and", "xor"):
+                ops_parts = ops.split(",")
+                if len(ops_parts) == 2 and ops_parts[1] in ("0", "0x0"):
+                    total_nops += 1
+
+        return total_nops
         
 
     def check_spray(self, data) -> Tuple[str, str]:
@@ -388,13 +446,14 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
             if not asm_code: 
                 return ("False", "Undetected Attack")
             else:
-                """If the code ratio is greater than 99 percent, we assume spraying 
-                    (if it is 100 percent, we consider it a false positive)"""
-                total_code_len = sum(c.size for c in asm_code) 
-                code_rate = total_code_len /len(data)
-                if code_rate > 0.99 and code_rate < 1: 
-                    code_rate = math.floor(code_rate * 10000) / 100
-                    return ("Spraying", f"[Spraying:] {code_rate:.2f} % of code coverage")
+                """ Spraying usually consists of a payload preceded by NOP sleds (repetitive instructions).
+                    Low entropy usually means highly repetitive code that may suggest a large number of NOPs. 
+                    It is necessary to check that this low entropy is actually due to a high presence of NOPs. """
+                code_entropy = self.asm_code_entropy(asm_code)
+                number_of_nops = self.nops_sum(asm_code)
+                nops_rate = number_of_nops / len(asm_code)
+                if code_entropy < 0.5 and nops_rate > 0.6:
+                    return ("Spraying", f"[Spraying:] {number_of_nops} NOPs of {len(asm_code)} total asm instrutions")
 
         return ("False", "Undetected Attack")            
         

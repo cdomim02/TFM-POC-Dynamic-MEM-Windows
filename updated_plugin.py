@@ -91,6 +91,12 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
                 default=False,
                 optional=True,
             ),
+            requirements.BooleanRequirement(
+                name="detect-attacks",
+                description="Analyze heap entries to detect possible attacks",
+                optional=True,
+                default=False
+            ),
         ]
 
     def _is_win_8_1_to_11(self, kuser: objects.StructType) -> bool:
@@ -563,29 +569,29 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
                                 heap_layer = "backend"
 
                                 (decoded_data, file_output, data) = self._generate_output(proc_name, pid, peb.vol.layer_name, heap_entry, heap_entry_size, granularity)
+                                results = [pid,
+                                            proc_name,
+                                            format_hints.Hex(heap),
+                                            format_hints.Hex(segment.BaseAddress),
+                                            format_hints.Hex(heap_entry_addr),
+                                            format_hints.Hex(heap_entry_size),
+                                            f"[{heap_entry_flags:02x}]",
+                                            self._flag_to_string(heap_entry_flags),
+                                            heap_layer,
+                                            decoded_data,
+                                            file_output
+                                    ]
 
-                                """ Possible attacks dtection based on patterns """                      
-                                (detected_attack, attack_details) = self.is_attacked(heap_entry_flags, heap_entry_size, heap_entry_addr, next_entry_by_size, segment.LastValidEntry, data)    
+                                """ Possible attacks dtection based on patterns """          
+                                if self.config["detect-attacks"]:            
+                                    (detected_attack, attack_details) = self.is_attacked(heap_entry_flags, heap_entry_size, heap_entry_addr, next_entry_by_size, segment.LastValidEntry, data)    
+                                    results.append(detected_attack)
+                                    results.append(attack_details)
+
                                 next_entry_by_size = heap_entry_addr + heap_entry_size 
                                     
-                                yield (
-                                    0,
-                                    (
-                                        pid,
-                                        proc_name,
-                                        format_hints.Hex(heap),
-                                        format_hints.Hex(segment.BaseAddress),
-                                        format_hints.Hex(heap_entry_addr),
-                                        format_hints.Hex(heap_entry_size),
-                                        f"[{heap_entry_flags:02x}]",
-                                        self._flag_to_string(heap_entry_flags),
-                                        heap_layer,
-                                        decoded_data,
-                                        file_output,
-                                        detected_attack,
-                                        attack_details
-                                    )
-                                )
+                                """ Show results """
+                                yield (0, tuple(results))
 
                                 """
                                 If the _HEAP_ENTRY is allocated internally by the LFH heap, we only need to check the _HEAP_ENTRYs
@@ -603,9 +609,7 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
                                         for lfh_heap_entry in lfh_entries[user_blocks_address]["heap_entries"]:
                                             """ We could not retrieve the _HEAP_ENTRY from memory, we only know the address """
                                             if isinstance(lfh_heap_entry, int):
-                                                yield (
-                                                    0,
-                                                    (
+                                                results = [
                                                         pid,
                                                         proc_name,
                                                         format_hints.Hex(heap),
@@ -616,11 +620,16 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
                                                         "????",
                                                         heap_layer,
                                                         "????",
-                                                        "Unavailable",
-                                                        "????",
-                                                        "????"
-                                                    )
-                                                )
+                                                        "Unavailable",                                                        
+                                                    ]
+                                                
+                                                if self.config["detect-attacks"]: 
+                                                    (detected_attack_spray, attack_details_spray) = self.check_spray(data)
+                                                    results.append("????")
+                                                    results.append("????")
+
+                                                """ Show results """
+                                                yield (0, tuple(results))
                                             else:
                                                 """ We can obtain the _HEAP_ENTRY status directly from _HEAP_ENTRY.UnusedBytes """
                                                 lfh_heap_entry_flags = lfh_heap_entry.UnusedBytes
@@ -634,12 +643,7 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
 
                                                 (decoded_data, file_output, data) = self._generate_output(proc_name, pid, peb.vol.layer_name, lfh_heap_entry, lfh_heap_entry_size, granularity)
 
-                                                """ Overflow is exclusive of backend, LFH is less deterministic """
-                                                (detected_attack_spray, attack_details_spray) = self.check_spray(data)
-
-                                                yield (
-                                                    0,
-                                                    (
+                                                results = [
                                                         pid,
                                                         proc_name,
                                                         format_hints.Hex(heap),
@@ -650,11 +654,17 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
                                                         lfh_heap_entry_flags_str,
                                                         heap_layer,
                                                         decoded_data,
-                                                        file_output,
-                                                        detected_attack_spray,
-                                                        attack_details_spray
-                                                    )
-                                                )
+                                                        file_output
+                                                    ]
+
+                                                """ Overflow is exclusive of backend, LFH is less deterministic """
+                                                if self.config["detect-attacks"]: 
+                                                    (detected_attack_spray, attack_details_spray) = self.check_spray(data)
+                                                    results.append(detected_attack_spray)
+                                                    results.append(attack_details_spray)
+
+                                                """ Show results """
+                                                yield (0, tuple(results))
 
                                 """ Finally, move the pointer to the next _HEAP_ENTRY """
                                 heap_entry_addr = next_entry_by_size 
@@ -666,8 +676,7 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
     def run(self):
         filter_func = pslist.PsList.create_pid_filter(self.config.get("pid", None))
 
-        return renderers.TreeGrid(
-            [
+        columns = [
                 ("PID", int),
                 ("Name", str),
                 ("Heap", format_hints.Hex),
@@ -678,11 +687,15 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
                 ("State", str),
                 ("Layer", str),
                 ("Data", str),
-                ("File Output", str),
-                ("Detected Attack", str),
-                ("Attack Details", str)
+                ("File Output", str)
+            ]
+        
+        if self.config["detect-attacks"]:
+            columns.append(("Detected Attack", str))
+            columns.append(("Attack Details", str))
 
-            ],
+        return renderers.TreeGrid(
+            columns,
             self._generator(
                 pslist.PsList.list_processes(
                     context=self.context,

@@ -338,13 +338,12 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
         flag_encoded = HEAP_ENTRY_FLAGS(flag)
         detected_attack = "[Overflow:] "
 
-        # Check flags related with free state
-        """ User flags are usually cleared when a heap entry is freed """
-        if (HEAP_ENTRY_FLAGS.BUSY not in flag_encoded) and ((HEAP_ENTRY_FLAGS.SETTABLE_FLAG1 in flag_encoded) or 
-                                                            (HEAP_ENTRY_FLAGS.SETTABLE_FLAG2 in flag_encoded) or 
-                                                            (HEAP_ENTRY_FLAGS.SETTABLE_FLAG3 in flag_encoded)):
-            detected_attack += "user flags in a free entry; "
+        # Check flags related with fill pattern
+        """ In production environments, the FILL_PATTERN flag must not be active """
+        if (HEAP_ENTRY_FLAGS.FILL_PATTERN in flag_encoded):
+            detected_attack += "fill pattern flag in production; "
 
+        # Check flags related with free state
         """ Allocations to VirtualAlloc for a large size are not stored in traditional
             bins when freed, so these spaces cannot be marked as free """
         if (HEAP_ENTRY_FLAGS.BUSY not in flag_encoded) and (HEAP_ENTRY_FLAGS.VIRTUAL_ALLOC in flag_encoded):
@@ -449,17 +448,21 @@ class AnonymizedPlugin(interfaces.plugins.PluginInterface):
             asm_code = list(self._md_capstone.disasm(data, 0x1000))
 
             """ If there is no code, we assume that there is no spraying """
-            if not asm_code: 
+            if not asm_code or len(data) < 0x400: 
                 return ("False", "Undetected Attack")
             else:
-                """ Spraying usually consists of a payload preceded by NOP sleds (repetitive instructions).
-                    Low entropy usually means highly repetitive code that may suggest a large number of NOPs. 
-                    It is necessary to check that this low entropy is actually due to a high presence of NOPs. """
-                code_entropy = self.asm_code_entropy(asm_code)
-                number_of_nops = self.nops_sum(asm_code)
-                nops_rate = number_of_nops / len(asm_code)
-                if code_entropy < 0.5 and nops_rate > 0.6:
-                    return ("Spraying", f"[Spraying:] {number_of_nops} NOPs of {len(asm_code)} total asm instrutions")
+                """ Ignore entries with few asm code relative to the total size"""
+                decoded_bytes = sum(ins.size for ins in asm_code)
+                decoded_bytes_ratio = decoded_bytes / len(data)
+                if decoded_bytes_ratio > 0.6:
+                    """ Spraying usually consists of a payload preceded by NOP sleds (repetitive instructions).
+                        Low entropy usually means highly repetitive code that may suggest a large number of NOPs. 
+                        It is necessary to check that this low entropy is actually due to a high presence of NOPs. """
+                    code_entropy = self.asm_code_entropy(asm_code)
+                    number_of_nops = self.nops_sum(asm_code)
+                    nops_rate = number_of_nops / len(asm_code)
+                    if code_entropy > 0 and code_entropy < 0.5 and nops_rate > 0.6:
+                        return ("Spraying", f"[Spraying:] {number_of_nops} NOPs of {len(asm_code)} total asm instrutions")
 
         return ("False", "Undetected Attack")            
         

@@ -5,7 +5,7 @@ En este repositorio se recoge una serie de pruebas de concepto que implementan l
 
 - **double-free:** ataque basado en el aprovechamiento de la liberación de un espacio de memoria dinámica ya liberado, lo cual corrompe las listas de almacenamiento de porciones de memoria (*heap entries* o *chunks*) vacías.
 
-- **heap overflow:** ataque que trata de acceder a un espacio de la memoria *heap* que no pertenece al proceso o usuario que realiza dicho ataque.
+- **heap overflow:** ataque que trata de acceder a un espacio de la memoria *heap* fuera de los límites del espacio reservado por el atacant.
 
 - **heap spraying:** ataque complementario que busca esparcir por la memoria dinámica un *payload* destinado a acciones maliciosas. Este *payload* está pensado para ser accedido mediante la modificación del flujo de control de la aplicación, modificación realizada por ataques como los anteriores.
 
